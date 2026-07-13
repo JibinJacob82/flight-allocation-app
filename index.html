@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -286,6 +287,41 @@
         /* Placeholder */
         .placeholder { padding: 40px; text-align: center; color: var(--light); font-size: 12px; }
         .placeholder .icon { font-size: 32px; margin-bottom: 8px; }
+
+        /* Export Bar */
+        .export-bar {
+            display: flex;
+            justify-content: flex-end;
+            gap: 6px;
+            margin-top: 10px;
+            padding-top: 8px;
+            border-top: 1px solid var(--border);
+        }
+        .btn-export {
+            padding: 6px 12px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            color: var(--text);
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 600;
+            transition: background 0.12s, border-color 0.12s;
+        }
+        .btn-export:hover { background: #e8eaed; border-color: #c8cdd3; }
+        .btn-export.btn-email { background: var(--blue); color: white; border-color: var(--blue); }
+        .btn-export.btn-email:hover { background: #1d4ed8; }
+
+        /* Print styles — hide chrome, keep only the roster */
+        @media print {
+            body { background: white; padding: 0; }
+            .container { box-shadow: none; padding: 0; max-width: 100%; }
+            .upload-bar, .export-bar, .header p { display: none !important; }
+            .header { border-bottom: 2px solid #000; }
+            .flights-container, .unassigned-flights { border-style: solid; }
+            .flight-tile { break-inside: avoid; }
+            .staff-row { break-inside: avoid; }
+        }
     </style>
 </head>
 <body>
@@ -325,6 +361,16 @@
             </div>
             <div class="upload-status" id="dateStatus">Upload roster first</div>
         </div>
+
+        <div class="upload-card" id="lddCard" style="display:none">
+            <div class="upload-card-label">④ Select LDD</div>
+            <div class="upload-card-row">
+                <select id="lddSelect" style="flex:1;padding:5px 7px;border:1px solid var(--border);border-radius:5px;font-size:12px;background:white;color:var(--text);">
+                    <option value="">-- Pick LDD staff --</option>
+                </select>
+            </div>
+            <div class="upload-status" id="lddStatus">Choose who is on LDD duty</div>
+        </div>
     </div>
 
     <div class="summary-strip" id="summaryStrip">
@@ -340,6 +386,11 @@
             <div class="icon">📋</div>
             Upload the monthly roster, then the flight details, then pick a date to begin.
         </div>
+    </div>
+
+    <div class="export-bar" id="exportBar">
+        <button class="btn-export" id="exportPdfBtn" onclick="exportToPdf()">📄 Export as PDF</button>
+        <button class="btn-export btn-email" id="emailBtn" onclick="emailViaOutlook()">📧 Email via Outlook</button>
     </div>
 
 </div>
@@ -432,26 +483,36 @@ function toMins(hhmm) {
 // ── Skill / Authorization Rules ──────────────────────────────────────
 // Easy to amend in future: add airlines to specialFlights, add staff entries.
 const SKILL_RULES = {
-    specialFlights: ["EY", "QR", "AC", "DL"],
+    specialFlights: ["EY", "QR", "AC", "DL", "TS"],
     defaultAuthorization: true,  // unlisted staff: NOT authorized for any specialFlights
     staff: [
         { name: "Adam",     authorizedSpecialFlights: ["EY","QR"] },
         { name: "Tyrone",   authorizedSpecialFlights: ["EY","QR"] },
         { name: "Andy",     authorizedSpecialFlights: ["EY","QR"] },
         { name: "Aby",      authorizedSpecialFlights: ["EY","DL"] },
-        { name: "Rawi",     authorizedSpecialFlights: ["QR","AC"] },
-        { name: "Youbert",  authorizedSpecialFlights: ["EY","QR"] },
-        { name: "Isobel",   authorizedSpecialFlights: ["QR","AC","DL"] },
+        { name: "Rawi",     authorizedSpecialFlights: ["AC","QR"] },
+        { name: "Yuberth",  authorizedSpecialFlights: ["EY","QR"] },
+        { name: "Isobel",   authorizedSpecialFlights: ["QR","AC","DL","TS"] },
         { name: "Amy",      authorizedSpecialFlights: ["DL"] },
-        { name: "Jakub",    authorizedSpecialFlights: ["QR","AC"] },
-        { name: "Kevin",    authorizedSpecialFlights: ["EY","QR","AC","DL"] },
-        { name: "Masha",    authorizedSpecialFlights: ["EY","QR","AC","DL"] },
+        { name: "Jakub",    authorizedSpecialFlights: ["AC","DL","QR"] },
+        { name: "Kevin",    authorizedSpecialFlights: ["AC","QR","EY","DL"] },
+        { name: "Masha",    authorizedSpecialFlights: ["AC","QR","EY","DL"] },
         { name: "Alanna",   authorizedSpecialFlights: ["AC","DL"] },
         { name: "Gabriele", authorizedSpecialFlights: ["EY","DL"] },
-        { name: "Dragos",   authorizedSpecialFlights: ["QR","AC"] },
-        { name: "Hamza",    authorizedSpecialFlights: ["DL","AC"] },
-        { name: "Chiko",    authorizedSpecialFlights: ["AC","DL"] },
-        { name: "Aoife",    authorizedSpecialFlights: ["DL"] }
+        { name: "Dragos",   authorizedSpecialFlights: ["AC","QR"] },
+        { name: "Hamza",    authorizedSpecialFlights: ["AC","DL"] },
+        { name: "Chiko",    authorizedSpecialFlights: ["AC","DL","TS"] },
+        { name: "Dylan",    authorizedSpecialFlights: ["DL","TS"] },
+        { name: "Aoife",    authorizedSpecialFlights: ["DL"] },
+        { name: "Daniel",   authorizedSpecialFlights: ["DL"] },
+        { name: "Nelya",    authorizedSpecialFlights: ["TS"] },
+        { name: "Aaron",    authorizedSpecialFlights: ["DL"] },
+        { name: "Balint",   authorizedSpecialFlights: ["TS"] },
+        { name: "Amara",    authorizedSpecialFlights: ["DL"] },
+        { name: "Jamie",    authorizedSpecialFlights: ["TS","DL"] },
+        { name: "Sinead",   authorizedSpecialFlights: [] },
+        { name: "Hiraldo",  authorizedSpecialFlights: [] },
+        { name: "Louise",   authorizedSpecialFlights: ["DL"] }
     ]
 };
 
@@ -558,6 +619,8 @@ function flightSortTime(f) {
 document.getElementById('rosterFile').addEventListener('change', e => {
     const file = e.target.files[0];
     if (!file) return;
+    // Reset so re-uploading the same or a new file always triggers change
+    e.target.value = '';
     const reader = new FileReader();
     reader.onload = ev => {
         try {
@@ -651,6 +714,8 @@ function parseRoster(grid, fname) {
 document.getElementById('flightsFile').addEventListener('change', e => {
     const file = e.target.files[0];
     if (!file) return;
+    // Reset so re-uploading the same or a new file always triggers change
+    e.target.value = '';
     const reader = new FileReader();
     reader.onload = ev => {
         try {
@@ -692,6 +757,7 @@ function parseFlights(raw, fname) {
 
 // ── Date Change ───────────────────────────────────────────────────────
 document.getElementById('dateInput').addEventListener('change', tryAllocate);
+document.getElementById('lddSelect').addEventListener('change', tryAllocate);
 
 // ── Allocation Engine ─────────────────────────────────────────────────
 function tryAllocate() {
@@ -707,16 +773,41 @@ function tryAllocate() {
 
     const acsStaff = staffOnDate.filter(s => s.role === 'ACS');
 
-    // From the LDD-named staff working today, pick ONE randomly as LDD.
-    // The rest become Dispatchers for that day.
+    // LDD candidates working today
     const lddCandidates = staffOnDate.filter(s => s.role === 'LDD');
-    let lddStaff = [];
+
+    // Populate LDD selector with staff working today
+    const lddCard   = document.getElementById('lddCard');
+    const lddSelect = document.getElementById('lddSelect');
     if (lddCandidates.length > 0) {
-        const pickedIdx = Math.floor(Math.random() * lddCandidates.length);
-        lddCandidates.forEach((s, i) => {
-            if (i === pickedIdx) lddStaff.push(s);
-            else s.role = 'Dispatcher';  // demote rest to dispatcher
+        lddCard.style.display = '';
+        // Rebuild options preserving current selection if still valid
+        const prevVal = lddSelect.value;
+        lddSelect.innerHTML = '<option value="">-- Pick LDD staff --</option>';
+        lddCandidates.forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s.name;
+            opt.textContent = titleCase(s.name);
+            lddSelect.appendChild(opt);
         });
+        // Restore previous selection if still valid
+        if (prevVal && lddCandidates.find(s => s.name === prevVal)) lddSelect.value = prevVal;
+    } else {
+        lddCard.style.display = 'none';
+    }
+
+    // Determine who is LDD: selected staff member, else none yet (wait for selection)
+    const chosenLDD = lddSelect.value;
+    let lddStaff = [];
+    lddCandidates.forEach(s => {
+        if (s.name === chosenLDD) lddStaff.push(s);
+        else s.role = 'Dispatcher';
+    });
+
+    if (lddCandidates.length > 0 && !chosenLDD) {
+        setStatus('lddStatus', '⚠ Please select LDD staff', 'err');
+    } else if (chosenLDD) {
+        setStatus('lddStatus', `✓ ${titleCase(chosenLDD)} is on LDD`, 'ok');
     }
 
     const dispatchers = staffOnDate.filter(s => s.role === 'Dispatcher');
@@ -725,13 +816,17 @@ function tryAllocate() {
     allocMap = {};
     [...acsStaff, ...dispatchers, ...lddStaff].forEach(s => { allocMap[s.name] = []; });
 
-    // Sort flights: priority first (special airline flights > others > ARR-only last),
-    // then by time within each priority group.
+    // Allocation priority:
+    // 0 = highest: EY/AC/QR any type, DL DEP only
+    // 1 = all other airlines BOTH and DEP
+    // 2 = lowest: HU ARR and DL ARR
     function priorityRank(f) {
         const airline = getAirlineCode(f);
-        if (SKILL_RULES.specialFlights.includes(airline)) return 0; // highest priority
-        if (f.type === 'ARR') return 2;                              // lowest priority
-        return 1;                                                    // everything else
+        if (['EY','AC','QR'].includes(airline))                    return 0;
+        if (airline === 'DL' && f.type === 'DEP')                  return 0;
+        if (f.type === 'BOTH' || f.type === 'DEP')                 return 1;
+        if (f.type === 'ARR' && (airline === 'HU' || airline === 'DL')) return 2;
+        return 1; // any other ARR (treated same as BOTH/DEP)
     }
     const sorted = [...allFlights].sort((a,b) => {
         const pa = priorityRank(a), pb = priorityRank(b);
@@ -992,6 +1087,39 @@ function updateSummary(acs, disp, ldd) {
     chip.textContent = unassigned.length + ' Unassigned';
     chip.style.display = unassigned.length > 0 ? '' : 'none';
 }
+
+// ── Export / Email ────────────────────────────────────────────────────
+// Uses the browser's native print dialog (choose "Save as PDF") so the
+// current on-screen allocation — including any manual drag-and-drop
+// adjustments — is exactly what gets exported.
+function exportToPdf() {
+    if (!selectedDateForExport()) {
+        alert('Please select a date and load flights before exporting.');
+        return;
+    }
+    const oldTitle = document.title;
+    document.title = 'Flight Allocation - ' + (document.getElementById('dateInput').value || 'Roster');
+    window.print();
+    document.title = oldTitle;
+}
+
+function selectedDateForExport() {
+    return document.getElementById('dateInput').value && allFlights.length > 0;
+}
+
+// Opens Outlook (via mailto:) with a pre-filled subject/body.
+// Browsers cannot auto-attach files for security reasons, so this
+// reminds the user to save the PDF (via Export) and attach it manually.
+function emailViaOutlook() {
+    const dateVal = document.getElementById('dateInput').value || '';
+    const subject = encodeURIComponent('Flight Allocation Roster - ' + dateVal);
+    const body = encodeURIComponent(
+        'Hi,\n\nPlease find attached the flight allocation roster for ' + dateVal + '.\n\n' +
+        '(Tip: click "Export as PDF" first, save the file, then attach it here before sending.)\n\nThanks.'
+    );
+    window.location.href = `mailto:?subject=${subject}&body=${body}`;
+}
 </script>
+
 </body>
 </html>
