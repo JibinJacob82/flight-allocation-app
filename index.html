@@ -311,6 +311,60 @@
         .btn-export.btn-email { background: var(--blue); color: white; border-color: var(--blue); }
         .btn-export.btn-email:hover { background: #1d4ed8; }
 
+        /* Toggle button */
+        .mode-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 0;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            overflow: hidden;
+            font-size: 10px;
+            font-weight: 600;
+        }
+        .mode-btn {
+            padding: 5px 10px;
+            background: var(--bg);
+            border: none;
+            cursor: pointer;
+            color: var(--muted);
+            transition: background 0.12s, color 0.12s;
+            white-space: nowrap;
+        }
+        .mode-btn.active {
+            background: var(--blue);
+            color: white;
+        }
+        .mode-btn:first-child { border-right: 1px solid var(--border); }
+
+        /* Click-mode tile states */
+        .flight-tile.click-selected {
+            border: 2px solid #f59e0b;
+            background: #fef3c7;
+            box-shadow: 0 0 0 3px rgba(245,158,11,0.25);
+            cursor: pointer;
+            animation: pulse-selected 1.2s infinite;
+        }
+        @keyframes pulse-selected {
+            0%, 100% { box-shadow: 0 0 0 3px rgba(245,158,11,0.25); }
+            50%       { box-shadow: 0 0 0 5px rgba(245,158,11,0.4); }
+        }
+        .flight-tile.click-mode { cursor: pointer; }
+        .flight-tile.click-mode:hover { border-color: #f59e0b; background: #fffbeb; }
+
+        /* Click-mode drop target */
+        .flights-container.click-target,
+        .unassigned-flights.click-target {
+            border-color: #f59e0b;
+            background: #fffbeb;
+            cursor: pointer;
+        }
+        .flights-container.click-target .drop-hint,
+        .unassigned-flights.click-target .drop-hint {
+            color: #d97706;
+            font-weight: 600;
+        }
+
         /* Print styles — hide chrome, keep only the roster */
         @media print {
             body { background: white; padding: 0; }
@@ -360,14 +414,29 @@
             </div>
             <div class="upload-status" id="dateStatus">Upload roster first</div>
         </div>
+
+        <div class="upload-card" id="lddCard" style="display:none">
+            <div class="upload-card-label">④ Select LDD</div>
+            <div class="upload-card-row">
+                <select id="lddSelect" style="flex:1;padding:5px 7px;border:1px solid var(--border);border-radius:5px;font-size:12px;background:white;color:var(--text);">
+                    <option value="">-- Pick LDD staff --</option>
+                </select>
+            </div>
+            <div class="upload-status" id="lddStatus">Choose who is on LDD duty</div>
+        </div>
     </div>
 
-    <div class="summary-strip" id="summaryStrip">
+    <div class="summary-strip" id="summaryStrip" style="align-items:center;">
         <span class="chip chip-purple" id="chipACS"></span>
         <span class="chip chip-blue"   id="chipDisp"></span>
         <span class="chip chip-amber"  id="chipLDD"></span>
         <span class="chip chip-green"  id="chipFlights"></span>
         <span class="chip chip-red"    id="chipUnassigned" style="display:none"></span>
+        <span style="flex:1"></span>
+        <div class="mode-toggle">
+            <button class="mode-btn active" id="btnDragMode"  onclick="setMode('drag')">🖱 Drag</button>
+            <button class="mode-btn"        id="btnClickMode" onclick="setMode('click')">👆 Click</button>
+        </div>
     </div>
 
     <div id="mainArea">
@@ -399,9 +468,14 @@ let flightsReady = false;
 let dragFlight = null;   // flight object being dragged
 let dragSrc    = null;   // source array reference
 
+// Click-to-move state
+let clickFlight   = null;  // flight selected by click
+let clickSrc      = null;  // source array for click-selected flight
+let interactMode  = 'drag'; // 'drag' or 'click'
+
 // ── Constants ─────────────────────────────────────────────────────────
 const ACS_NAMES   = ['LUCIA','JIBIN','JACK','ALEKS'];
-const LDD_NAMES   = ['AMY','JAKUB','ISOBEL'];
+const LDD_NAMES   = ['AMY','JAKUB','ISOBEL','MASHA'];
 const ADMIN_NAMES = ['JOHN'];
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -746,6 +820,7 @@ function parseFlights(raw, fname) {
 
 // ── Date Change ───────────────────────────────────────────────────────
 document.getElementById('dateInput').addEventListener('change', tryAllocate);
+document.getElementById('lddSelect').addEventListener('change', tryAllocate);
 
 // ── Allocation Engine ─────────────────────────────────────────────────
 function tryAllocate() {
@@ -761,16 +836,41 @@ function tryAllocate() {
 
     const acsStaff = staffOnDate.filter(s => s.role === 'ACS');
 
-    // From the LDD-named staff working today, pick ONE randomly as LDD.
-    // The rest become Dispatchers for that day.
+    // LDD candidates working today
     const lddCandidates = staffOnDate.filter(s => s.role === 'LDD');
-    let lddStaff = [];
+
+    // Populate LDD selector with staff working today
+    const lddCard   = document.getElementById('lddCard');
+    const lddSelect = document.getElementById('lddSelect');
     if (lddCandidates.length > 0) {
-        const pickedIdx = Math.floor(Math.random() * lddCandidates.length);
-        lddCandidates.forEach((s, i) => {
-            if (i === pickedIdx) lddStaff.push(s);
-            else s.role = 'Dispatcher';  // demote rest to dispatcher
+        lddCard.style.display = '';
+        // Rebuild options preserving current selection if still valid
+        const prevVal = lddSelect.value;
+        lddSelect.innerHTML = '<option value="">-- Pick LDD staff --</option>';
+        lddCandidates.forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s.name;
+            opt.textContent = titleCase(s.name);
+            lddSelect.appendChild(opt);
         });
+        // Restore previous selection if still valid
+        if (prevVal && lddCandidates.find(s => s.name === prevVal)) lddSelect.value = prevVal;
+    } else {
+        lddCard.style.display = 'none';
+    }
+
+    // Determine who is LDD: selected staff member, else none yet (wait for selection)
+    const chosenLDD = lddSelect.value;
+    let lddStaff = [];
+    lddCandidates.forEach(s => {
+        if (s.name === chosenLDD) lddStaff.push(s);
+        else s.role = 'Dispatcher';
+    });
+
+    if (lddCandidates.length > 0 && !chosenLDD) {
+        setStatus('lddStatus', '⚠ Please select LDD staff', 'err');
+    } else if (chosenLDD) {
+        setStatus('lddStatus', `✓ ${titleCase(chosenLDD)} is on LDD`, 'ok');
     }
 
     const dispatchers = staffOnDate.filter(s => s.role === 'Dispatcher');
@@ -864,12 +964,19 @@ function makeRow(staff, labelCls, roleLabel, badgeCls) {
     fc.className = 'flights-container';
     fc._flights = flightArr;   // store live array on element
 
-    fc.addEventListener('dragover', e => { e.preventDefault(); fc.classList.add('over'); });
+    fc.addEventListener('dragover', e => { if (interactMode==='drag') { e.preventDefault(); fc.classList.add('over'); } });
     fc.addEventListener('dragleave', ()  => fc.classList.remove('over'));
     fc.addEventListener('drop', e => {
+        if (interactMode !== 'drag') return;
         e.preventDefault();
         fc.classList.remove('over');
         moveFlightTo(flightArr, staff.name);
+    });
+    fc.addEventListener('click', e => {
+        if (interactMode !== 'click' || !clickFlight) return;
+        e.stopPropagation();
+        moveFlightTo(flightArr, staff.name);
+        cancelClickMove();
     });
 
     renderFC(fc);
@@ -906,12 +1013,19 @@ function makeUnassignedSection() {
     uf.id = 'unassignedDiv';
     uf._flights = unassigned;
 
-    uf.addEventListener('dragover', e => { e.preventDefault(); uf.classList.add('over'); });
+    uf.addEventListener('dragover', e => { if (interactMode==='drag') { e.preventDefault(); uf.classList.add('over'); } });
     uf.addEventListener('dragleave', ()  => uf.classList.remove('over'));
     uf.addEventListener('drop', e => {
+        if (interactMode !== 'drag') return;
         e.preventDefault();
         uf.classList.remove('over');
         moveFlightTo(unassigned, null);
+    });
+    uf.addEventListener('click', e => {
+        if (interactMode !== 'click' || !clickFlight) return;
+        e.stopPropagation();
+        moveFlightTo(unassigned, null);
+        cancelClickMove();
     });
 
     renderUF(uf);
@@ -938,7 +1052,8 @@ function renderUF(uf) {
 function makeTile(flight, srcArr) {
     const tile = document.createElement('div');
     tile.className = 'flight-tile';
-    tile.draggable = true;
+    tile.draggable = (interactMode === 'drag');
+    if (interactMode === 'click') tile.classList.add('click-mode');
 
     const typeCls  = flight.type==='ARR'?'t-arr':flight.type==='DEP'?'t-dep':'t-both';
     const typeIcon = flight.type==='ARR'?'🔻 ARR':flight.type==='DEP'?'🔺 DEP':'🔄 T/A';
@@ -951,7 +1066,9 @@ function makeTile(flight, srcArr) {
         <div class="ftyp ${typeCls}">${typeIcon}</div>
         <div class="ftime">${timeStr}</div>`;
 
+    // ── Drag mode events ──
     tile.addEventListener('dragstart', () => {
+        if (interactMode !== 'drag') return;
         dragFlight = flight;
         dragSrc    = srcArr;
         setTimeout(() => tile.classList.add('dragging'), 0);
@@ -963,13 +1080,42 @@ function makeTile(flight, srcArr) {
         dragSrc    = null;
     });
     tile.addEventListener('dragover', e => {
+        if (interactMode !== 'drag') return;
         if (dragFlight && dragFlight.id !== flight.id) { e.preventDefault(); tile.classList.add('drag-over'); }
     });
     tile.addEventListener('dragleave', () => tile.classList.remove('drag-over'));
     tile.addEventListener('drop', e => {
+        if (interactMode !== 'drag') return;
         e.stopPropagation();
         tile.classList.remove('drag-over');
         if (dragFlight && dragFlight.id !== flight.id) swapFlights(flight, srcArr);
+    });
+
+    // ── Click mode events ──
+    tile.addEventListener('click', e => {
+        if (interactMode !== 'click') return;
+        e.stopPropagation();
+
+        if (clickFlight && clickFlight.id === flight.id) {
+            // Re-click same tile = cancel
+            cancelClickMove();
+            return;
+        }
+
+        if (clickFlight) {
+            // Another tile is selected — swap them
+            swapFlights(flight, srcArr);
+            cancelClickMove();
+            return;
+        }
+
+        // Select this tile
+        clickFlight = flight;
+        clickSrc    = srcArr;
+        tile.classList.add('click-selected');
+        // Highlight all drop zones
+        document.querySelectorAll('.flights-container, .unassigned-flights')
+            .forEach(fc => fc.classList.add('click-target'));
     });
 
     return tile;
@@ -977,37 +1123,47 @@ function makeTile(flight, srcArr) {
 
 // ── Drag Logic ────────────────────────────────────────────────────────
 function moveFlightTo(targetArr, staffName) {
-    if (!dragFlight || !dragSrc) return;
-    if (dragSrc === targetArr) return;
+    // Works for both drag and click modes
+    const srcFlight = dragFlight || clickFlight;
+    const src       = dragSrc    || clickSrc;
+    if (!srcFlight || !src) return;
+    if (src === targetArr) { cancelClickMove(); return; }
 
-    const idx = dragSrc.findIndex(f => f.id === dragFlight.id);
+    const idx = src.findIndex(f => f.id === srcFlight.id);
     if (idx === -1) return;
-    dragSrc.splice(idx, 1);
-    targetArr.push(dragFlight);
+    src.splice(idx, 1);
+    targetArr.push(srcFlight);
 
-    dragFlight = null;
-    dragSrc    = null;
+    dragFlight = null; dragSrc = null;
     refresh();
 }
 
 function swapFlights(targetFlight, targetArr) {
-    if (!dragFlight || !dragSrc) return;
-    const di = dragSrc.findIndex(f => f.id === dragFlight.id);
+    // Works for both drag and click modes
+    const srcFlight = dragFlight || clickFlight;
+    const src       = dragSrc    || clickSrc;
+    if (!srcFlight || !src) return;
+
+    const di = src.findIndex(f => f.id === srcFlight.id);
     const ti = targetArr.findIndex(f => f.id === targetFlight.id);
     if (di === -1 || ti === -1) return;
 
-    if (dragSrc === targetArr) {
-        // Same array — just swap positions
-        [dragSrc[di], targetArr[ti]] = [targetArr[ti], dragSrc[di]];
+    if (src === targetArr) {
+        [src[di], targetArr[ti]] = [targetArr[ti], src[di]];
     } else {
-        // Cross-array swap
-        const tmp = dragSrc[di];
-        dragSrc[di]    = targetArr[ti];
-        targetArr[ti]  = tmp;
+        const tmp  = src[di];
+        src[di]    = targetArr[ti];
+        targetArr[ti] = tmp;
     }
-    dragFlight = null;
-    dragSrc    = null;
+    dragFlight = null; dragSrc = null;
     refresh();
+}
+
+function cancelClickMove() {
+    clickFlight = null;
+    clickSrc    = null;
+    document.querySelectorAll('.flight-tile').forEach(t => t.classList.remove('click-selected'));
+    document.querySelectorAll('.flights-container, .unassigned-flights').forEach(fc => fc.classList.remove('click-target'));
 }
 
 // ── Refresh (after drag) ──────────────────────────────────────────────
@@ -1038,6 +1194,24 @@ function refresh() {
         chip.style.display = unassigned.length > 0 ? '' : 'none';
     }
 }
+
+// ── Mode Toggle ───────────────────────────────────────────────────────
+function setMode(mode) {
+    interactMode = mode;
+    cancelClickMove();
+    document.getElementById('btnDragMode').classList.toggle('active',  mode === 'drag');
+    document.getElementById('btnClickMode').classList.toggle('active', mode === 'click');
+    // Update tile draggable attribute and cursor
+    document.querySelectorAll('.flight-tile').forEach(t => {
+        t.draggable = (mode === 'drag');
+        t.classList.toggle('click-mode', mode === 'click');
+    });
+}
+
+// ESC key cancels click-mode selection
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') cancelClickMove();
+});
 
 // ── Summary ───────────────────────────────────────────────────────────
 function updateSummary(acs, disp, ldd) {
