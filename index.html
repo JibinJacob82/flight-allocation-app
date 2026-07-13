@@ -1,0 +1,1262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flight Allocation Dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --bg: #f0f2f5;
+            --surface: #ffffff;
+            --border: #e2e6ea;
+            --border-dash: #c8cdd3;
+            --text: #1a1d21;
+            --muted: #6b7280;
+            --light: #9ca3af;
+            --blue: #2563eb;
+            --blue-lt: #eff6ff;
+            --green: #16a34a;
+            --green-lt: #f0fdf4;
+            --amber: #d97706;
+            --amber-lt: #fffbeb;
+            --red: #dc2626;
+            --red-lt: #fef2f2;
+            --purple: #7c3aed;
+            --purple-lt: #f5f3ff;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--bg);
+            padding: 8px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1700px;
+            margin: 0 auto;
+            background: var(--surface);
+            border-radius: 10px;
+            padding: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border);
+        }
+        .header-icon { font-size: 22px; }
+        .header h1 { font-size: 16px; font-weight: 700; color: var(--text); }
+        .header p { font-size: 11px; color: var(--muted); margin-top: 1px; }
+
+        /* Upload Bar */
+        .upload-bar {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+        }
+        .upload-card {
+            flex: 1;
+            min-width: 180px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 7px;
+            padding: 8px 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        .upload-card-label {
+            font-size: 10px;
+            font-weight: 700;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.07em;
+        }
+        .upload-card-row { display: flex; align-items: center; gap: 6px; }
+        .upload-card input[type="file"] { display: none; }
+        .upload-card input[type="date"] {
+            flex: 1;
+            padding: 5px 7px;
+            border: 1px solid var(--border);
+            border-radius: 5px;
+            font-size: 12px;
+            background: white;
+            color: var(--text);
+            cursor: pointer;
+        }
+        .upload-card input[type="date"]:disabled { background: #f0f0f0; color: var(--light); cursor: not-allowed; }
+        .btn {
+            padding: 5px 10px;
+            background: var(--blue);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 600;
+            white-space: nowrap;
+            transition: background 0.15s;
+        }
+        .btn:hover { background: #1d4ed8; }
+        .upload-status { font-size: 10px; color: var(--light); min-height: 14px; }
+        .upload-status.ok  { color: var(--green); font-weight: 500; }
+        .upload-status.err { color: var(--red); }
+
+        /* Summary Strip */
+        .summary-strip { display: none; gap: 5px; margin-bottom: 10px; flex-wrap: wrap; }
+        .summary-strip.on { display: flex; }
+        .chip {
+            padding: 2px 8px;
+            border-radius: 20px;
+            font-size: 10px;
+            font-weight: 600;
+        }
+        .chip-purple { background: var(--purple-lt); color: var(--purple); }
+        .chip-blue   { background: var(--blue-lt);   color: var(--blue);   }
+        .chip-amber  { background: var(--amber-lt);  color: var(--amber);  }
+        .chip-green  { background: var(--green-lt);  color: var(--green);  }
+        .chip-red    { background: var(--red-lt);    color: var(--red);    }
+
+        /* Section Divider */
+        .divider {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 8px 0 4px;
+        }
+        .divider-label {
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            padding: 2px 8px;
+            border-radius: 3px;
+            white-space: nowrap;
+        }
+        .d-acs        { background: var(--purple-lt); color: var(--purple); }
+        .d-dispatcher { background: var(--blue-lt);   color: var(--blue);   }
+        .d-ldd        { background: var(--amber-lt);  color: var(--amber);  }
+        .divider-line { flex: 1; height: 1px; background: var(--border); }
+
+        /* Staff Row */
+        .staff-row {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 5px;
+            align-items: stretch;
+        }
+        .staff-label {
+            width: 128px;
+            flex-shrink: 0;
+            border-radius: 6px;
+            padding: 6px 8px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            gap: 2px;
+            border-left: 3px solid transparent;
+        }
+        .sl-acs        { background: var(--purple-lt); border-left-color: var(--purple); }
+        .sl-dispatcher { background: var(--blue-lt);   border-left-color: var(--blue);   }
+        .sl-ldd        { background: var(--amber-lt);  border-left-color: var(--amber);  }
+
+        .staff-name  { font-size: 11px; font-weight: 700; color: var(--text); }
+        .staff-times { font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+        .role-badge  {
+            display: inline-block;
+            font-size: 9px;
+            font-weight: 600;
+            padding: 1px 5px;
+            border-radius: 10px;
+            margin-top: 2px;
+            width: fit-content;
+        }
+        .rb-acs        { background: rgba(124,58,237,.12); color: var(--purple); }
+        .rb-dispatcher { background: rgba(37,99,235,.12);  color: var(--blue);   }
+        .rb-ldd        { background: rgba(217,119,6,.12);  color: var(--amber);  }
+        .flights-pill  {
+            display: inline-block;
+            font-size: 9px;
+            font-weight: 600;
+            padding: 1px 5px;
+            border-radius: 10px;
+            background: rgba(37,99,235,.1);
+            color: var(--blue);
+            margin-top: 1px;
+        }
+
+        /* Flights Container */
+        .flights-container {
+            flex: 1;
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+            align-items: flex-start;
+            padding: 5px;
+            background: #fafafa;
+            border: 1.5px dashed var(--border-dash);
+            border-radius: 5px;
+            min-height: 46px;
+            transition: border-color 0.12s, background 0.12s;
+        }
+        .flights-container.over {
+            border-color: var(--blue);
+            background: var(--blue-lt);
+        }
+        .drop-hint {
+            font-size: 10px;
+            color: var(--light);
+            padding: 6px 4px;
+            pointer-events: none;
+            align-self: center;
+        }
+
+        /* Flight Tile */
+        .flight-tile {
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 4px 5px;
+            width: 88px;
+            cursor: grab;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+            transition: box-shadow 0.12s, border-color 0.12s, opacity 0.12s;
+            user-select: none;
+        }
+        .flight-tile:hover { border-color: var(--blue); box-shadow: 0 2px 5px rgba(37,99,235,.15); }
+        .flight-tile.dragging { opacity: 0.35; cursor: grabbing; }
+        .flight-tile.drag-over { border: 2px solid var(--green); background: var(--green-lt); }
+
+        .fn   { font-size: 10px; font-weight: 700; color: var(--text); margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .ftyp { font-size: 8px; font-weight: 600; padding: 1px 4px; border-radius: 3px; display: inline-block; margin-bottom: 2px; }
+        .t-arr  { background: var(--blue-lt);   color: var(--blue);  }
+        .t-dep  { background: var(--amber-lt);  color: var(--amber); }
+        .t-both { background: var(--green-lt);  color: var(--green); }
+        .ftime  { font-size: 8px; color: var(--muted); line-height: 1.3; font-variant-numeric: tabular-nums; }
+
+        /* Unassigned */
+        .unassigned-section {
+            margin-top: 10px;
+            background: var(--red-lt);
+            border: 1px solid #fca5a5;
+            border-radius: 7px;
+            padding: 8px;
+        }
+        .unassigned-header {
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--red);
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .unassigned-count {
+            background: var(--red);
+            color: white;
+            font-size: 9px;
+            font-weight: 700;
+            padding: 1px 6px;
+            border-radius: 10px;
+        }
+        .unassigned-flights {
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+            min-height: 46px;
+            padding: 5px;
+            background: white;
+            border-radius: 4px;
+            border: 1.5px dashed #fca5a5;
+            transition: border-color 0.12s, background 0.12s;
+        }
+        .unassigned-flights.over { border-color: var(--red); background: var(--red-lt); }
+        .all-done { font-size: 10px; color: var(--green); font-weight: 600; padding: 6px 4px; pointer-events: none; align-self: center; }
+
+        /* Placeholder */
+        .placeholder { padding: 40px; text-align: center; color: var(--light); font-size: 12px; }
+        .placeholder .icon { font-size: 32px; margin-bottom: 8px; }
+
+        /* Export Bar */
+        .export-bar {
+            display: flex;
+            justify-content: flex-end;
+            gap: 6px;
+            margin-top: 10px;
+            padding-top: 8px;
+            border-top: 1px solid var(--border);
+        }
+        .btn-export {
+            padding: 6px 12px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            color: var(--text);
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 600;
+            transition: background 0.12s, border-color 0.12s;
+        }
+        .btn-export:hover { background: #e8eaed; border-color: #c8cdd3; }
+        .btn-export.btn-email { background: var(--blue); color: white; border-color: var(--blue); }
+        .btn-export.btn-email:hover { background: #1d4ed8; }
+
+        /* Toggle button */
+        .mode-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 0;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            overflow: hidden;
+            font-size: 10px;
+            font-weight: 600;
+        }
+        .mode-btn {
+            padding: 5px 10px;
+            background: var(--bg);
+            border: none;
+            cursor: pointer;
+            color: var(--muted);
+            transition: background 0.12s, color 0.12s;
+            white-space: nowrap;
+        }
+        .mode-btn.active {
+            background: var(--blue);
+            color: white;
+        }
+        .mode-btn:first-child { border-right: 1px solid var(--border); }
+
+        /* Click-mode tile states */
+        .flight-tile.click-selected {
+            border: 2px solid #f59e0b;
+            background: #fef3c7;
+            box-shadow: 0 0 0 3px rgba(245,158,11,0.25);
+            cursor: pointer;
+            animation: pulse-selected 1.2s infinite;
+        }
+        @keyframes pulse-selected {
+            0%, 100% { box-shadow: 0 0 0 3px rgba(245,158,11,0.25); }
+            50%       { box-shadow: 0 0 0 5px rgba(245,158,11,0.4); }
+        }
+        .flight-tile.click-mode { cursor: pointer; }
+        .flight-tile.click-mode:hover { border-color: #f59e0b; background: #fffbeb; }
+
+        /* Click-mode drop target */
+        .flights-container.click-target,
+        .unassigned-flights.click-target {
+            border-color: #f59e0b;
+            background: #fffbeb;
+            cursor: pointer;
+        }
+        .flights-container.click-target .drop-hint,
+        .unassigned-flights.click-target .drop-hint {
+            color: #d97706;
+            font-weight: 600;
+        }
+
+        /* Print styles — hide chrome, keep only the roster */
+        @media print {
+            body { background: white; padding: 0; }
+            .container { box-shadow: none; padding: 0; max-width: 100%; }
+            .upload-bar, .export-bar, .header p { display: none !important; }
+            .header { border-bottom: 2px solid #000; }
+            .flights-container, .unassigned-flights { border-style: solid; }
+            .flight-tile { break-inside: avoid; }
+            .staff-row { break-inside: avoid; }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+
+    <div class="header">
+        <div class="header-icon">✈️</div>
+        <div>
+            <h1>Flight Allocation Dashboard</h1>
+            <p>Upload roster → Upload flights → Select date → Auto-allocate · Drag tiles to adjust</p>
+        </div>
+    </div>
+
+    <div class="upload-bar">
+        <div class="upload-card">
+            <div class="upload-card-label">① Monthly Roster</div>
+            <div class="upload-card-row">
+                <input type="file" id="rosterFile" accept=".xlsx,.xls">
+                <button class="btn" onclick="document.getElementById('rosterFile').click()">📋 Upload Roster</button>
+            </div>
+            <div class="upload-status" id="rosterStatus">No roster loaded</div>
+        </div>
+
+        <div class="upload-card">
+            <div class="upload-card-label">② Flight Details</div>
+            <div class="upload-card-row">
+                <input type="file" id="flightsFile" accept=".xlsx,.xls">
+                <button class="btn" onclick="document.getElementById('flightsFile').click()">✈️ Upload Flights</button>
+            </div>
+            <div class="upload-status" id="flightsStatus">No flights loaded</div>
+        </div>
+
+        <div class="upload-card">
+            <div class="upload-card-label">③ Select Date</div>
+            <div class="upload-card-row">
+                <input type="date" id="dateInput" disabled>
+            </div>
+            <div class="upload-status" id="dateStatus">Upload roster first</div>
+        </div>
+
+        <div class="upload-card" id="lddCard" style="display:none">
+            <div class="upload-card-label">④ Select LDD</div>
+            <div class="upload-card-row">
+                <select id="lddSelect" style="flex:1;padding:5px 7px;border:1px solid var(--border);border-radius:5px;font-size:12px;background:white;color:var(--text);">
+                    <option value="">-- Pick LDD staff --</option>
+                </select>
+            </div>
+            <div class="upload-status" id="lddStatus">Choose who is on LDD duty</div>
+        </div>
+    </div>
+
+    <div class="summary-strip" id="summaryStrip" style="align-items:center;">
+        <span class="chip chip-purple" id="chipACS"></span>
+        <span class="chip chip-blue"   id="chipDisp"></span>
+        <span class="chip chip-amber"  id="chipLDD"></span>
+        <span class="chip chip-green"  id="chipFlights"></span>
+        <span class="chip chip-red"    id="chipUnassigned" style="display:none"></span>
+        <span style="flex:1"></span>
+        <div class="mode-toggle">
+            <button class="mode-btn active" id="btnDragMode"  onclick="setMode('drag')">🖱 Drag</button>
+            <button class="mode-btn"        id="btnClickMode" onclick="setMode('click')">👆 Click</button>
+        </div>
+    </div>
+
+    <div id="mainArea">
+        <div class="placeholder">
+            <div class="icon">📋</div>
+            Upload the monthly roster, then the flight details, then pick a date to begin.
+        </div>
+    </div>
+
+    <div class="export-bar" id="exportBar">
+        <button class="btn-export" id="exportPdfBtn" onclick="exportToPdf()">📄 Export as PDF</button>
+        <button class="btn-export btn-email" id="emailBtn" onclick="emailViaOutlook()">📧 Email via Outlook</button>
+    </div>
+
+</div>
+<script>
+// ── State ─────────────────────────────────────────────────────────────
+let rosterByDate  = {};   // 'YYYY-MM-DD' → [{name,start,end,role}]
+let allFlights    = [];   // all parsed flights (no dispatcher)
+let staffOnDate   = [];   // staff for current date
+let unassigned    = [];   // flights not yet assigned
+
+// Allocation map: staffName → flight[]  (arrays kept alive for drag-drop)
+let allocMap = {};
+
+let rosterReady  = false;
+let flightsReady = false;
+
+let dragFlight = null;   // flight object being dragged
+let dragSrc    = null;   // source array reference
+
+// Click-to-move state
+let clickFlight   = null;  // flight selected by click
+let clickSrc      = null;  // source array for click-selected flight
+let interactMode  = 'drag'; // 'drag' or 'click'
+
+// ── Constants ─────────────────────────────────────────────────────────
+const ACS_NAMES   = ['LUCIA','JIBIN','JACK','ALEKS'];
+const LDD_NAMES   = ['AMY','JAKUB','ISOBEL','MASHA'];
+const ADMIN_NAMES = ['JOHN'];
+
+// ── Helpers ───────────────────────────────────────────────────────────
+const pad = n => String(n).padStart(2,'0');
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const safeId = s => String(s).replace(/[^a-zA-Z0-9]/g,'_');
+const titleCase = s => s.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+
+function setStatus(id, msg, cls) {
+    const el = document.getElementById(id);
+    el.textContent = msg;
+    el.className = 'upload-status' + (cls ? ' ' + cls : '');
+}
+
+function getRole(name) {
+    const n = name.trim().toUpperCase().split(/[\s,]+/)[0];
+    if (ACS_NAMES.includes(n))   return 'ACS';
+    if (LDD_NAMES.includes(n))   return 'LDD';
+    if (ADMIN_NAMES.includes(n)) return 'ADMIN';
+    return 'Dispatcher';
+}
+
+const STATUS_WORDS = ['OFF','HOL','UL','REQ','LONG','ID','TRAINING','SHADOW','NO','OT','TRAIN','CE','QR'];
+
+function excelTimeToHHMM(val) {
+    if (val == null) return null;
+    if (val instanceof Date) return pad(val.getHours()) + ':' + pad(val.getMinutes());
+    if (typeof val === 'number' && val >= 0 && val < 1) {
+        const m = Math.round(val * 1440);
+        return pad(Math.floor(m/60)) + ':' + pad(m%60);
+    }
+    if (typeof val === 'string') {
+        const s = val.trim();
+        if (!s || s === '\u00a0') return null;
+        if (STATUS_WORDS.includes(s.toUpperCase())) return null;
+        const hit = s.replace(';',':').match(/^(\d{1,2}):(\d{2})/);
+        if (hit) return pad(+hit[1]) + ':' + pad(+hit[2]);
+    }
+    return null;
+}
+
+function isStatus(val) {
+    if (typeof val !== 'string') return false;
+    return STATUS_WORDS.includes(val.trim().toUpperCase());
+}
+
+function formatFlightTime(val) {
+    if (val == null || val === '') return 'N/A';
+    if (val instanceof Date) return pad(val.getHours()) + ':' + pad(val.getMinutes());
+    const s = String(val).trim();
+    if (!s) return 'N/A';
+    const n = parseFloat(s);
+    if (!isNaN(n) && n >= 0 && n < 1) {
+        const m = Math.round(n * 1440);
+        return pad(Math.floor(m/60)) + ':' + pad(m%60);
+    }
+    const hit = s.match(/^(\d{1,2}):(\d{2})/);
+    if (hit) return pad(+hit[1]) + ':' + pad(+hit[2]);
+    return 'N/A';
+}
+
+function toMins(hhmm) {
+    if (!hhmm || hhmm === 'N/A') return null;
+    const [h,m] = hhmm.split(':').map(Number);
+    return h*60 + m;
+}
+
+// ── Skill / Authorization Rules ──────────────────────────────────────
+// Easy to amend in future: add airlines to specialFlights, add staff entries.
+const SKILL_RULES = {
+    specialFlights: ["EY", "QR", "AC", "DL", "TS"],
+    defaultAuthorization: true,  // unlisted staff: NOT authorized for any specialFlights
+    staff: [
+        { name: "Adam",     authorizedSpecialFlights: ["EY","QR"] },
+        { name: "Tyrone",   authorizedSpecialFlights: ["EY","QR"] },
+        { name: "Andy",     authorizedSpecialFlights: ["EY","QR"] },
+        { name: "Aby",      authorizedSpecialFlights: ["EY","DL"] },
+        { name: "Rawi",     authorizedSpecialFlights: ["AC","QR"] },
+        { name: "Yuberth",  authorizedSpecialFlights: ["EY","QR"] },
+        { name: "Isobel",   authorizedSpecialFlights: ["QR","AC","DL","TS"] },
+        { name: "Amy",      authorizedSpecialFlights: ["DL"] },
+        { name: "Jakub",    authorizedSpecialFlights: ["AC","DL","QR"] },
+        { name: "Kevin",    authorizedSpecialFlights: ["AC","QR","EY","DL"] },
+        { name: "Masha",    authorizedSpecialFlights: ["AC","QR","EY","DL"] },
+        { name: "Alanna",   authorizedSpecialFlights: ["AC","DL"] },
+        { name: "Gabriele", authorizedSpecialFlights: ["EY","DL"] },
+        { name: "Dragos",   authorizedSpecialFlights: ["AC","QR"] },
+        { name: "Hamza",    authorizedSpecialFlights: ["AC","DL"] },
+        { name: "Chiko",    authorizedSpecialFlights: ["AC","DL","TS"] },
+        { name: "Dylan",    authorizedSpecialFlights: ["DL","TS"] },
+        { name: "Aoife",    authorizedSpecialFlights: ["DL"] },
+        { name: "Daniel",   authorizedSpecialFlights: ["DL"] },
+        { name: "Nelya",    authorizedSpecialFlights: ["TS"] },
+        { name: "Aaron",    authorizedSpecialFlights: ["DL"] },
+        { name: "Balint",   authorizedSpecialFlights: ["TS"] },
+        { name: "Amara",    authorizedSpecialFlights: ["DL"] },
+        { name: "Jamie",    authorizedSpecialFlights: ["TS","DL"] },
+        { name: "Sinead",   authorizedSpecialFlights: [] },
+        { name: "Hiraldo",  authorizedSpecialFlights: [] },
+        { name: "Louise",   authorizedSpecialFlights: ["DL"] }
+    ]
+};
+
+function getAirlineCode(flight) {
+    return flight.number.substring(0,2).toUpperCase();
+}
+
+// Is this dispatcher authorized to handle this flight's airline?
+// Non-special airlines: always authorized. Special airlines: must be explicitly listed.
+function isAuthorized(dispatcher, flight) {
+    const code = getAirlineCode(flight);
+    if (!SKILL_RULES.specialFlights.includes(code)) return true;  // not a special airline, no restriction
+
+    const firstName = dispatcher.name.trim().split(/[\s,]+/)[0];
+    const entry = SKILL_RULES.staff.find(s => s.name.toUpperCase() === firstName.toUpperCase());
+    if (!entry) return false; // unlisted staff: blocked from all special-airline flights
+    return entry.authorizedSpecialFlights.includes(code);
+}
+
+// ── Engagement Window ─────────────────────────────────────────────────
+// Returns { from, to } in minutes-from-midnight (may exceed 1440 for overnight spans)
+function engagementWindow(f) {
+    const sta = toMins(f.sta);
+    const std = toMins(f.std);
+
+    if (f.type === 'ARR') {
+        // Engaged STA -> STA+30
+        return { from: sta, to: sta + 30 };
+    }
+    if (f.type === 'DEP') {
+        // Engaged STD-75 -> STD
+        return { from: std - 75, to: std };
+    }
+    // BOTH (turnaround)
+    const airline = getAirlineCode(f);
+    const PREMIUM = ['EY','QR','AC'];
+    const prep = PREMIUM.includes(airline) ? 75 : 30;
+    let staM = sta, stdM = std;
+    // Handle overnight turnaround (STD before STA numerically means it's next day)
+    if (stdM < staM) stdM += 1440;
+    return { from: staM - prep, to: stdM };
+}
+
+// Normalize a window against a duty shift that may cross midnight.
+// Returns adjusted {from,to} shifted into the same "timeline" as shift start.
+function normalizeWindow(win, shiftStart) {
+    let { from, to } = win;
+    // Wrap into 0-1440 range first
+    from = ((from % 1440) + 1440) % 1440;
+    to   = ((to % 1440) + 1440) % 1440;
+    if (to <= from) to += 1440; // window itself crosses midnight
+    // Shift relative to shiftStart so overnight duty (e.g. start 22:00) compares correctly
+    if (from < shiftStart) { from += 1440; to += 1440; }
+    return { from, to };
+}
+
+// Does dispatcher's shift (start->end, overnight-safe) fully contain the engagement window?
+function shiftContainsWindow(dispatcher, win) {
+    const s = toMins(dispatcher.start);
+    let e = toMins(dispatcher.end);
+    if (s == null || e == null) return false;
+    if (e <= s) e += 1440; // overnight shift
+
+    const norm = normalizeWindow(win, s);
+    return norm.from >= s && norm.to <= e;
+}
+
+// Do two engagement windows overlap? (both normalized against same reference)
+function windowsOverlap(winA, winB, refStart) {
+    const a = normalizeWindow(winA, refStart);
+    const b = normalizeWindow(winB, refStart);
+    return a.from < b.to && b.from < a.to;
+}
+
+// Full eligibility check: shift covers window, no overlap with existing flights, authorized
+function dispatcherEligible(dispatcher, flight, assignedFlights) {
+    if (!flight.sta && !flight.std) return false;
+    if (flight.type === 'ARR' && (!flight.sta || flight.sta === 'N/A')) return false;
+    if (flight.type === 'DEP' && (!flight.std || flight.std === 'N/A')) return false;
+    if (flight.type === 'BOTH' && (flight.sta === 'N/A' || flight.std === 'N/A')) return false;
+
+    if (!isAuthorized(dispatcher, flight)) return false;
+
+    const win = engagementWindow(flight);
+    if (!shiftContainsWindow(dispatcher, win)) return false;
+
+    const shiftStart = toMins(dispatcher.start);
+    const existing = assignedFlights[dispatcher.name] || [];
+    for (const ef of existing) {
+        const efWin = engagementWindow(ef);
+        if (windowsOverlap(win, efWin, shiftStart)) return false;
+    }
+    return true;
+}
+
+// Primary sort time for a flight
+function flightSortTime(f) {
+    if (f.sta && f.sta !== 'N/A') return f.sta;
+    if (f.std && f.std !== 'N/A') return f.std;
+    return '99:99';
+}
+
+// ── Roster Upload ─────────────────────────────────────────────────────
+document.getElementById('rosterFile').addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    // Reset so re-uploading the same or a new file always triggers change
+    e.target.value = '';
+    const reader = new FileReader();
+    reader.onload = ev => {
+        try {
+            const wb = XLSX.read(new Uint8Array(ev.target.result), {type:'array', cellDates:true});
+            const ws = wb.Sheets[wb.SheetNames[0]];
+            const grid = XLSX.utils.sheet_to_json(ws, {header:1, defval:null, raw:true});
+            parseRoster(grid, file.name);
+        } catch(err) { setStatus('rosterStatus','✗ '+err.message,'err'); }
+    };
+    reader.readAsArrayBuffer(file);
+});
+
+function parseRoster(grid, fname) {
+    rosterByDate = {};
+
+    // Find date row (first row in top-5 with Date objects in cols 1+)
+    let dateRowIdx = -1;
+    for (let r = 0; r < Math.min(grid.length,5); r++) {
+        const row = grid[r] || [];
+        for (let c = 1; c < row.length; c++) {
+            if (row[c] instanceof Date) { dateRowIdx = r; break; }
+        }
+        if (dateRowIdx !== -1) break;
+    }
+    if (dateRowIdx === -1) { setStatus('rosterStatus','✗ Date row not found','err'); return; }
+
+    // Build column → dateKey map
+    const colDate = {};
+    const dateRow = grid[dateRowIdx];
+    for (let c = 1; c < dateRow.length; c++) {
+        const v = dateRow[c];
+        if (v instanceof Date) {
+            colDate[c] = v.getFullYear()+'-'+pad(v.getMonth()+1)+'-'+pad(v.getDate());
+        }
+    }
+
+    // Walk employee rows (rows after date row where col-0 is a non-empty string)
+    for (let r = dateRowIdx+1; r < grid.length; r++) {
+        const nameRow  = grid[r]   || [];
+        const startRow = grid[r-1] || [];
+        const cell0 = nameRow[0];
+        if (cell0 == null) continue;
+        if (cell0 instanceof Date) continue;
+        if (typeof cell0 !== 'string') continue;
+        const name = cell0.trim();
+        if (!name || name === '\u00a0') continue;
+        if (['DAY','DATE'].includes(name.toUpperCase())) continue;
+
+        const role = getRole(name);
+        if (role === 'ADMIN') continue;
+
+        for (const [colStr, dateKey] of Object.entries(colDate)) {
+            const col = +colStr;
+            const startVal = startRow[col];
+            const endVal   = nameRow[col];
+
+            if (isStatus(endVal) || isStatus(startVal)) continue;
+
+            const startT = excelTimeToHHMM(startVal);
+            const endT   = excelTimeToHHMM(endVal);
+            if (!startT && !endT) continue;
+
+            if (!rosterByDate[dateKey]) rosterByDate[dateKey] = [];
+            rosterByDate[dateKey].push({
+                name,
+                start: startT || endT,
+                end:   endT   || startT,
+                role
+            });
+        }
+    }
+
+    const days = Object.keys(rosterByDate).length;
+    const names = new Set(Object.values(rosterByDate).flat().map(s=>s.name));
+    setStatus('rosterStatus', `✓ ${names.size} staff · ${days} days`, 'ok');
+    rosterReady = true;
+
+    const dateEl = document.getElementById('dateInput');
+    dateEl.disabled = false;
+    const keys = Object.keys(rosterByDate).sort();
+    if (keys.length) {
+        dateEl.min = keys[0];
+        dateEl.max = keys[keys.length-1];
+        dateEl.value = keys[0];
+    }
+    setStatus('dateStatus','Pick a date','');
+    tryAllocate();
+}
+
+// ── Flights Upload ────────────────────────────────────────────────────
+document.getElementById('flightsFile').addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    // Reset so re-uploading the same or a new file always triggers change
+    e.target.value = '';
+    const reader = new FileReader();
+    reader.onload = ev => {
+        try {
+            const wb = XLSX.read(ev.target.result, {type:'binary'});
+            const ws = wb.Sheets[wb.SheetNames[0]];
+            const raw = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
+            parseFlights(raw, file.name);
+        } catch(err) { setStatus('flightsStatus','✗ '+err.message,'err'); }
+    };
+    reader.readAsBinaryString(file);
+});
+
+function parseFlights(raw, fname) {
+    allFlights = [];
+    let fid = 0;
+    for (let i = 1; i < raw.length; i++) {
+        const row = raw[i];
+        const arrFl  = String(row[1]||'').trim();
+        const arrFr  = String(row[2]||'').trim();
+        const sta    = formatFlightTime(row[3]);
+        const depFl  = String(row[4]||'').trim();
+        const depTo  = String(row[5]||'').trim();
+        const std    = formatFlightTime(row[6]);
+
+        if (!arrFl && !depFl) continue;
+
+        if (arrFl && depFl) {
+            allFlights.push({id:`F${fid++}`, number:`${arrFl}/${depFl}`, type:'BOTH', from:arrFr, to:depTo, sta, std});
+        } else if (arrFl) {
+            allFlights.push({id:`F${fid++}`, number:arrFl, type:'ARR', from:arrFr, to:'N/A', sta, std:'N/A'});
+        } else {
+            allFlights.push({id:`F${fid++}`, number:depFl, type:'DEP', from:'N/A', to:depTo, sta:'N/A', std});
+        }
+    }
+    setStatus('flightsStatus', `✓ ${allFlights.length} flights loaded`, 'ok');
+    flightsReady = true;
+    tryAllocate();
+}
+
+// ── Date Change ───────────────────────────────────────────────────────
+document.getElementById('dateInput').addEventListener('change', tryAllocate);
+document.getElementById('lddSelect').addEventListener('change', tryAllocate);
+
+// ── Allocation Engine ─────────────────────────────────────────────────
+function tryAllocate() {
+    const dateVal = document.getElementById('dateInput').value;
+    if (!rosterReady || !flightsReady || !dateVal) return;
+    if (!rosterByDate[dateVal]) {
+        setStatus('dateStatus','⚠ No staff data for this date','err');
+        return;
+    }
+    setStatus('dateStatus', '✓ ' + dateVal, 'ok');
+
+    staffOnDate = JSON.parse(JSON.stringify(rosterByDate[dateVal]));
+
+    const acsStaff = staffOnDate.filter(s => s.role === 'ACS');
+
+    // LDD candidates working today
+    const lddCandidates = staffOnDate.filter(s => s.role === 'LDD');
+
+    // Populate LDD selector with staff working today
+    const lddCard   = document.getElementById('lddCard');
+    const lddSelect = document.getElementById('lddSelect');
+    if (lddCandidates.length > 0) {
+        lddCard.style.display = '';
+        // Rebuild options preserving current selection if still valid
+        const prevVal = lddSelect.value;
+        lddSelect.innerHTML = '<option value="">-- Pick LDD staff --</option>';
+        lddCandidates.forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s.name;
+            opt.textContent = titleCase(s.name);
+            lddSelect.appendChild(opt);
+        });
+        // Restore previous selection if still valid
+        if (prevVal && lddCandidates.find(s => s.name === prevVal)) lddSelect.value = prevVal;
+    } else {
+        lddCard.style.display = 'none';
+    }
+
+    // Determine who is LDD: selected staff member, else none yet (wait for selection)
+    const chosenLDD = lddSelect.value;
+    let lddStaff = [];
+    lddCandidates.forEach(s => {
+        if (s.name === chosenLDD) lddStaff.push(s);
+        else s.role = 'Dispatcher';
+    });
+
+    if (lddCandidates.length > 0 && !chosenLDD) {
+        setStatus('lddStatus', '⚠ Please select LDD staff', 'err');
+    } else if (chosenLDD) {
+        setStatus('lddStatus', `✓ ${titleCase(chosenLDD)} is on LDD`, 'ok');
+    }
+
+    const dispatchers = staffOnDate.filter(s => s.role === 'Dispatcher');
+
+    // Reset allocation map with live arrays
+    allocMap = {};
+    [...acsStaff, ...dispatchers, ...lddStaff].forEach(s => { allocMap[s.name] = []; });
+
+    // Allocation priority:
+    // 0 = highest: EY/AC/QR any type, DL DEP only
+    // 1 = all other airlines BOTH and DEP
+    // 2 = lowest: HU ARR and DL ARR
+    function priorityRank(f) {
+        const airline = getAirlineCode(f);
+        if (['EY','AC','QR'].includes(airline))                    return 0;
+        if (airline === 'DL' && f.type === 'DEP')                  return 0;
+        if (f.type === 'BOTH' || f.type === 'DEP')                 return 1;
+        if (f.type === 'ARR' && (airline === 'HU' || airline === 'DL')) return 2;
+        return 1; // any other ARR (treated same as BOTH/DEP)
+    }
+    const sorted = [...allFlights].sort((a,b) => {
+        const pa = priorityRank(a), pb = priorityRank(b);
+        if (pa !== pb) return pa - pb;
+        return flightSortTime(a).localeCompare(flightSortTime(b));
+    });
+
+    unassigned = [];
+
+    sorted.forEach(flight => {
+        const eligible = dispatchers.filter(d => dispatcherEligible(d, flight, allocMap));
+        if (eligible.length === 0) { unassigned.push({...flight}); return; }
+
+        // Dispatcher with fewest flights
+        const best = eligible.reduce((p,c) => allocMap[p.name].length <= allocMap[c.name].length ? p : c);
+        allocMap[best.name].push({...flight});
+    });
+
+    renderAll(acsStaff, dispatchers, lddStaff);
+}
+
+// ── Render ────────────────────────────────────────────────────────────
+function renderAll(acsStaff, dispatchers, lddStaff) {
+    const main = document.getElementById('mainArea');
+    main.innerHTML = '';
+
+    if (acsStaff.length) {
+        main.appendChild(makeDivider('ACS', 'd-acs'));
+        acsStaff.forEach(s => main.appendChild(makeRow(s,'sl-acs','ACS','rb-acs')));
+    }
+    if (dispatchers.length) {
+        main.appendChild(makeDivider('Dispatchers','d-dispatcher'));
+        [...dispatchers].sort((a,b)=>(a.start||'').localeCompare(b.start||''))
+            .forEach(s => main.appendChild(makeRow(s,'sl-dispatcher','Dispatcher','rb-dispatcher')));
+    }
+    if (lddStaff.length) {
+        main.appendChild(makeDivider('LDD','d-ldd'));
+        lddStaff.forEach(s => main.appendChild(makeRow(s,'sl-ldd','LDD','rb-ldd')));
+    }
+
+    main.appendChild(makeUnassignedSection());
+    updateSummary(acsStaff, dispatchers, lddStaff);
+}
+
+function makeDivider(label, cls) {
+    const d = document.createElement('div');
+    d.className = 'divider';
+    d.innerHTML = `<span class="divider-label ${cls}">${label}</span><div class="divider-line"></div>`;
+    return d;
+}
+
+function makeRow(staff, labelCls, roleLabel, badgeCls) {
+    const flightArr = allocMap[staff.name];  // live array reference
+
+    const row = document.createElement('div');
+    row.className = 'staff-row';
+    row.dataset.name = staff.name;
+
+    // Left label
+    const label = document.createElement('div');
+    label.className = `staff-label ${labelCls}`;
+    label.innerHTML = `
+        <div class="staff-name">${esc(titleCase(staff.name))}</div>
+        <div class="staff-times">${staff.start||'--:--'} – ${staff.end||'--:--'}</div>
+        <span class="role-badge ${badgeCls}">${roleLabel}</span>
+        <span class="flights-pill" id="pill-${safeId(staff.name)}">
+            ${flightArr.length} flight${flightArr.length!==1?'s':''}
+        </span>`;
+
+    // Right flights container
+    const fc = document.createElement('div');
+    fc.className = 'flights-container';
+    fc._flights = flightArr;   // store live array on element
+
+    fc.addEventListener('dragover', e => { if (interactMode==='drag') { e.preventDefault(); fc.classList.add('over'); } });
+    fc.addEventListener('dragleave', ()  => fc.classList.remove('over'));
+    fc.addEventListener('drop', e => {
+        if (interactMode !== 'drag') return;
+        e.preventDefault();
+        fc.classList.remove('over');
+        moveFlightTo(flightArr, staff.name);
+    });
+    fc.addEventListener('click', e => {
+        if (interactMode !== 'click' || !clickFlight) return;
+        e.stopPropagation();
+        moveFlightTo(flightArr, staff.name);
+        cancelClickMove();
+    });
+
+    renderFC(fc);
+
+    row.appendChild(label);
+    row.appendChild(fc);
+    return row;
+}
+
+function renderFC(fc) {
+    fc.innerHTML = '';
+    const arr = fc._flights;
+    if (!arr || arr.length === 0) {
+        const hint = document.createElement('div');
+        hint.className = 'drop-hint';
+        hint.textContent = 'Drop flights here';
+        fc.appendChild(hint);
+        return;
+    }
+    const sorted = [...arr].sort((a,b) => flightSortTime(a).localeCompare(flightSortTime(b)));
+    sorted.forEach(f => fc.appendChild(makeTile(f, arr)));
+}
+
+function makeUnassignedSection() {
+    const sec = document.createElement('div');
+    sec.className = 'unassigned-section';
+
+    const hdr = document.createElement('div');
+    hdr.className = 'unassigned-header';
+    hdr.innerHTML = `⚠️ Unassigned Flights <span class="unassigned-count" id="unassignedCount">${unassigned.length}</span>`;
+
+    const uf = document.createElement('div');
+    uf.className = 'unassigned-flights';
+    uf.id = 'unassignedDiv';
+    uf._flights = unassigned;
+
+    uf.addEventListener('dragover', e => { if (interactMode==='drag') { e.preventDefault(); uf.classList.add('over'); } });
+    uf.addEventListener('dragleave', ()  => uf.classList.remove('over'));
+    uf.addEventListener('drop', e => {
+        if (interactMode !== 'drag') return;
+        e.preventDefault();
+        uf.classList.remove('over');
+        moveFlightTo(unassigned, null);
+    });
+    uf.addEventListener('click', e => {
+        if (interactMode !== 'click' || !clickFlight) return;
+        e.stopPropagation();
+        moveFlightTo(unassigned, null);
+        cancelClickMove();
+    });
+
+    renderUF(uf);
+
+    sec.appendChild(hdr);
+    sec.appendChild(uf);
+    return sec;
+}
+
+function renderUF(uf) {
+    uf.innerHTML = '';
+    if (unassigned.length === 0) {
+        const msg = document.createElement('div');
+        msg.className = 'all-done';
+        msg.textContent = '✓ All flights assigned!';
+        uf.appendChild(msg);
+        return;
+    }
+    const sorted = [...unassigned].sort((a,b) => flightSortTime(a).localeCompare(flightSortTime(b)));
+    sorted.forEach(f => uf.appendChild(makeTile(f, unassigned)));
+}
+
+// ── Flight Tile ───────────────────────────────────────────────────────
+function makeTile(flight, srcArr) {
+    const tile = document.createElement('div');
+    tile.className = 'flight-tile';
+    tile.draggable = (interactMode === 'drag');
+    if (interactMode === 'click') tile.classList.add('click-mode');
+
+    const typeCls  = flight.type==='ARR'?'t-arr':flight.type==='DEP'?'t-dep':'t-both';
+    const typeIcon = flight.type==='ARR'?'🔻 ARR':flight.type==='DEP'?'🔺 DEP':'🔄 T/A';
+    let timeStr = flight.type==='ARR' ? `STA ${flight.sta}`
+                : flight.type==='DEP' ? `STD ${flight.std}`
+                : `${flight.sta} / ${flight.std}`;
+
+    tile.innerHTML = `
+        <div class="fn">${esc(flight.number)}</div>
+        <div class="ftyp ${typeCls}">${typeIcon}</div>
+        <div class="ftime">${timeStr}</div>`;
+
+    // ── Drag mode events ──
+    tile.addEventListener('dragstart', () => {
+        if (interactMode !== 'drag') return;
+        dragFlight = flight;
+        dragSrc    = srcArr;
+        setTimeout(() => tile.classList.add('dragging'), 0);
+    });
+    tile.addEventListener('dragend', () => {
+        tile.classList.remove('dragging');
+        document.querySelectorAll('.flight-tile').forEach(t => t.classList.remove('drag-over'));
+        dragFlight = null;
+        dragSrc    = null;
+    });
+    tile.addEventListener('dragover', e => {
+        if (interactMode !== 'drag') return;
+        if (dragFlight && dragFlight.id !== flight.id) { e.preventDefault(); tile.classList.add('drag-over'); }
+    });
+    tile.addEventListener('dragleave', () => tile.classList.remove('drag-over'));
+    tile.addEventListener('drop', e => {
+        if (interactMode !== 'drag') return;
+        e.stopPropagation();
+        tile.classList.remove('drag-over');
+        if (dragFlight && dragFlight.id !== flight.id) swapFlights(flight, srcArr);
+    });
+
+    // ── Click mode events ──
+    tile.addEventListener('click', e => {
+        if (interactMode !== 'click') return;
+        e.stopPropagation();
+
+        if (clickFlight && clickFlight.id === flight.id) {
+            // Re-click same tile = cancel
+            cancelClickMove();
+            return;
+        }
+
+        if (clickFlight) {
+            // Another tile is selected — swap them
+            swapFlights(flight, srcArr);
+            cancelClickMove();
+            return;
+        }
+
+        // Select this tile
+        clickFlight = flight;
+        clickSrc    = srcArr;
+        tile.classList.add('click-selected');
+        // Highlight all drop zones
+        document.querySelectorAll('.flights-container, .unassigned-flights')
+            .forEach(fc => fc.classList.add('click-target'));
+    });
+
+    return tile;
+}
+
+// ── Drag Logic ────────────────────────────────────────────────────────
+function moveFlightTo(targetArr, staffName) {
+    // Works for both drag and click modes
+    const srcFlight = dragFlight || clickFlight;
+    const src       = dragSrc    || clickSrc;
+    if (!srcFlight || !src) return;
+    if (src === targetArr) { cancelClickMove(); return; }
+
+    const idx = src.findIndex(f => f.id === srcFlight.id);
+    if (idx === -1) return;
+    src.splice(idx, 1);
+    targetArr.push(srcFlight);
+
+    dragFlight = null; dragSrc = null;
+    refresh();
+}
+
+function swapFlights(targetFlight, targetArr) {
+    // Works for both drag and click modes
+    const srcFlight = dragFlight || clickFlight;
+    const src       = dragSrc    || clickSrc;
+    if (!srcFlight || !src) return;
+
+    const di = src.findIndex(f => f.id === srcFlight.id);
+    const ti = targetArr.findIndex(f => f.id === targetFlight.id);
+    if (di === -1 || ti === -1) return;
+
+    if (src === targetArr) {
+        [src[di], targetArr[ti]] = [targetArr[ti], src[di]];
+    } else {
+        const tmp  = src[di];
+        src[di]    = targetArr[ti];
+        targetArr[ti] = tmp;
+    }
+    dragFlight = null; dragSrc = null;
+    refresh();
+}
+
+function cancelClickMove() {
+    clickFlight = null;
+    clickSrc    = null;
+    document.querySelectorAll('.flight-tile').forEach(t => t.classList.remove('click-selected'));
+    document.querySelectorAll('.flights-container, .unassigned-flights').forEach(fc => fc.classList.remove('click-target'));
+}
+
+// ── Refresh (after drag) ──────────────────────────────────────────────
+// Re-renders only flight containers and pills — no full re-render
+function refresh() {
+    document.querySelectorAll('.staff-row').forEach(row => {
+        const fc = row.querySelector('.flights-container');
+        if (fc && fc._flights) {
+            renderFC(fc);
+            const sName = row.dataset.name;
+            const pill = document.getElementById('pill-' + safeId(sName));
+            if (pill) {
+                const n = fc._flights.length;
+                pill.textContent = n + ' flight' + (n!==1?'s':'');
+            }
+        }
+    });
+
+    const uf = document.getElementById('unassignedDiv');
+    if (uf) { uf._flights = unassigned; renderUF(uf); }
+
+    const cnt = document.getElementById('unassignedCount');
+    if (cnt) cnt.textContent = unassigned.length;
+
+    const chip = document.getElementById('chipUnassigned');
+    if (chip) {
+        chip.textContent = unassigned.length + ' Unassigned';
+        chip.style.display = unassigned.length > 0 ? '' : 'none';
+    }
+}
+
+// ── Mode Toggle ───────────────────────────────────────────────────────
+function setMode(mode) {
+    interactMode = mode;
+    cancelClickMove();
+    document.getElementById('btnDragMode').classList.toggle('active',  mode === 'drag');
+    document.getElementById('btnClickMode').classList.toggle('active', mode === 'click');
+    // Update tile draggable attribute and cursor
+    document.querySelectorAll('.flight-tile').forEach(t => {
+        t.draggable = (mode === 'drag');
+        t.classList.toggle('click-mode', mode === 'click');
+    });
+}
+
+// ESC key cancels click-mode selection
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') cancelClickMove();
+});
+
+// ── Summary ───────────────────────────────────────────────────────────
+function updateSummary(acs, disp, ldd) {
+    document.getElementById('chipACS').textContent     = `${acs.length} ACS`;
+    document.getElementById('chipDisp').textContent    = `${disp.length} Dispatchers`;
+    document.getElementById('chipLDD').textContent     = `${ldd.length} LDD`;
+    document.getElementById('chipFlights').textContent = `${allFlights.length} Flights`;
+    document.getElementById('summaryStrip').classList.add('on');
+    const chip = document.getElementById('chipUnassigned');
+    chip.textContent = unassigned.length + ' Unassigned';
+    chip.style.display = unassigned.length > 0 ? '' : 'none';
+}
+
+// ── Export / Email ────────────────────────────────────────────────────
+// Uses the browser's native print dialog (choose "Save as PDF") so the
+// current on-screen allocation — including any manual drag-and-drop
+// adjustments — is exactly what gets exported.
+function exportToPdf() {
+    if (!selectedDateForExport()) {
+        alert('Please select a date and load flights before exporting.');
+        return;
+    }
+    const oldTitle = document.title;
+    document.title = 'Flight Allocation - ' + (document.getElementById('dateInput').value || 'Roster');
+    window.print();
+    document.title = oldTitle;
+}
+
+function selectedDateForExport() {
+    return document.getElementById('dateInput').value && allFlights.length > 0;
+}
+
+// Opens Outlook (via mailto:) with a pre-filled subject/body.
+// Browsers cannot auto-attach files for security reasons, so this
+// reminds the user to save the PDF (via Export) and attach it manually.
+function emailViaOutlook() {
+    const dateVal = document.getElementById('dateInput').value || '';
+    const subject = encodeURIComponent('Flight Allocation Roster - ' + dateVal);
+    const body = encodeURIComponent(
+        'Hi,\n\nPlease find attached the flight allocation roster for ' + dateVal + '.\n\n' +
+        '(Tip: click "Export as PDF" first, save the file, then attach it here before sending.)\n\nThanks.'
+    );
+    window.location.href = `mailto:?subject=${subject}&body=${body}`;
+}
+</script>
+
+</body>
+</html>
