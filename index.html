@@ -360,16 +360,6 @@
             </div>
             <div class="upload-status" id="dateStatus">Upload roster first</div>
         </div>
-
-        <div class="upload-card" id="lddCard" style="display:none">
-            <div class="upload-card-label">④ Select LDD</div>
-            <div class="upload-card-row">
-                <select id="lddSelect" style="flex:1;padding:5px 7px;border:1px solid var(--border);border-radius:5px;font-size:12px;background:white;color:var(--text);">
-                    <option value="">-- Pick LDD staff --</option>
-                </select>
-            </div>
-            <div class="upload-status" id="lddStatus">Choose who is on LDD duty</div>
-        </div>
     </div>
 
     <div class="summary-strip" id="summaryStrip">
@@ -411,7 +401,7 @@ let dragSrc    = null;   // source array reference
 
 // ── Constants ─────────────────────────────────────────────────────────
 const ACS_NAMES   = ['LUCIA','JIBIN','JACK','ALEKS'];
-const LDD_NAMES   = ['AMY','JAKUB','ISOBEL','MASHA'];
+const LDD_NAMES   = ['AMY','JAKUB','ISOBEL'];
 const ADMIN_NAMES = ['JOHN'];
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -756,7 +746,6 @@ function parseFlights(raw, fname) {
 
 // ── Date Change ───────────────────────────────────────────────────────
 document.getElementById('dateInput').addEventListener('change', tryAllocate);
-document.getElementById('lddSelect').addEventListener('change', tryAllocate);
 
 // ── Allocation Engine ─────────────────────────────────────────────────
 function tryAllocate() {
@@ -772,41 +761,16 @@ function tryAllocate() {
 
     const acsStaff = staffOnDate.filter(s => s.role === 'ACS');
 
-    // LDD candidates working today
+    // From the LDD-named staff working today, pick ONE randomly as LDD.
+    // The rest become Dispatchers for that day.
     const lddCandidates = staffOnDate.filter(s => s.role === 'LDD');
-
-    // Populate LDD selector with staff working today
-    const lddCard   = document.getElementById('lddCard');
-    const lddSelect = document.getElementById('lddSelect');
-    if (lddCandidates.length > 0) {
-        lddCard.style.display = '';
-        // Rebuild options preserving current selection if still valid
-        const prevVal = lddSelect.value;
-        lddSelect.innerHTML = '<option value="">-- Pick LDD staff --</option>';
-        lddCandidates.forEach(s => {
-            const opt = document.createElement('option');
-            opt.value = s.name;
-            opt.textContent = titleCase(s.name);
-            lddSelect.appendChild(opt);
-        });
-        // Restore previous selection if still valid
-        if (prevVal && lddCandidates.find(s => s.name === prevVal)) lddSelect.value = prevVal;
-    } else {
-        lddCard.style.display = 'none';
-    }
-
-    // Determine who is LDD: selected staff member, else none yet (wait for selection)
-    const chosenLDD = lddSelect.value;
     let lddStaff = [];
-    lddCandidates.forEach(s => {
-        if (s.name === chosenLDD) lddStaff.push(s);
-        else s.role = 'Dispatcher';
-    });
-
-    if (lddCandidates.length > 0 && !chosenLDD) {
-        setStatus('lddStatus', '⚠ Please select LDD staff', 'err');
-    } else if (chosenLDD) {
-        setStatus('lddStatus', `✓ ${titleCase(chosenLDD)} is on LDD`, 'ok');
+    if (lddCandidates.length > 0) {
+        const pickedIdx = Math.floor(Math.random() * lddCandidates.length);
+        lddCandidates.forEach((s, i) => {
+            if (i === pickedIdx) lddStaff.push(s);
+            else s.role = 'Dispatcher';  // demote rest to dispatcher
+        });
     }
 
     const dispatchers = staffOnDate.filter(s => s.role === 'Dispatcher');
