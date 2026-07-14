@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -290,7 +291,8 @@
         /* Export Bar */
         .export-bar {
             display: flex;
-            justify-content: flex-end;
+            justify-content: space-between;
+            align-items: center;
             gap: 6px;
             margin-top: 10px;
             padding-top: 8px;
@@ -309,6 +311,8 @@
         }
         .btn-export:hover { background: #e8eaed; border-color: #c8cdd3; }
         .btn-export.btn-email { background: var(--blue); color: white; border-color: var(--blue); }
+        .btn-export.btn-redo  { background: var(--green-lt); color: var(--green); border-color: var(--green); font-weight:700; }
+        .btn-export.btn-redo:hover { background: #dcfce7; }
         .btn-export.btn-email:hover { background: #1d4ed8; }
 
         /* Toggle button */
@@ -447,6 +451,8 @@
     </div>
 
     <div class="export-bar" id="exportBar">
+        <button class="btn-export btn-redo" id="redoBtn" onclick="redoAllocation()" style="display:none">🔀 Redo Allocation</button>
+        <span style="flex:1"></span>
         <button class="btn-export" id="exportPdfBtn" onclick="exportToPdf()">📄 Export as PDF</button>
         <button class="btn-export btn-email" id="emailBtn" onclick="emailViaOutlook()">📧 Email via Outlook</button>
     </div>
@@ -612,7 +618,7 @@ function engagementWindow(f) {
     // BOTH (turnaround)
     const airline = getAirlineCode(f);
     const PREMIUM = ['EY','QR','AC'];
-    const prep = PREMIUM.includes(airline) ? 75 : 30;
+    const prep = airline === 'AC' ? 45 : PREMIUM.includes(airline) ? 75 : 30;
     let staM = sta, stdM = std;
     // Handle overnight turnaround (STD before STA numerically means it's next day)
     if (stdM < staM) stdM += 1440;
@@ -879,36 +885,283 @@ function tryAllocate() {
     allocMap = {};
     [...acsStaff, ...dispatchers, ...lddStaff].forEach(s => { allocMap[s.name] = []; });
 
-    // Allocation priority:
-    // 0 = highest: EY/AC/QR any type, DL DEP only
-    // 1 = all other airlines BOTH and DEP
-    // 2 = lowest: HU ARR and DL ARR
+    unassigned = [];
+    runAllocation(dispatchers, false);
+    renderAll(acsStaff, dispatchers, lddStaff);
+    // Show Redo button after first allocation
+    document.getElementById('redoBtn').style.display = '';
+    // Store dispatchers for redo
+    _lastDispatchers = dispatchers;
+    _lastAcs = acsStaff;
+    _lastLdd = lddStaff;
+}
+
+let _lastDispatchers = [], _lastAcs = [], _lastLdd = [];
+
+function redoAllocation() {
+    if (!_lastDispatchers.length) return;
+    // Reset allocMap
+    allocMap = {};
+    [..._lastAcs, ..._lastDispatchers, ..._lastLdd].forEach(s => { allocMap[s.name] = []; });
+    unassigned = [];
+    runAllocation(_lastDispatchers, true);  // isRedo=true → shuffled
+    renderAll(_lastAcs, _lastDispatchers, _lastLdd);
+}
+
+// ── Avoidance pairs (hard rule: these combos never go to same dispatcher) ──
+const AVOIDANCE_PAIRS = [
+    { after: 'TP1327', avoid: ['QR19','QR20'], sendUnassigned: true  },
+    { after: 'EY46',   avoid: ['DL44'],        sendUnassigned: false }
+    // Add more pairs here in future: { after: 'XX123', avoid: ['YY456'], sendUnassigned: true/false }
+];
+
+// Check if dispatcher has a flight from the 'after' list that would block 'flightNum'
+function isBlockedByAvoidance(dispatcher, flightNum) {
+    const assignedNums = (allocMap[dispatcher.name] || []).map(f => {
+        // For BOTH flights the number is like "TP1327/TP1328" — check both parts
+        return f.number.split('/');
+    }).flat().map(n => n.trim().toUpperCase());
+
+    for (const pair of AVOIDANCE_PAIRS) {
+        const avoidUpper = pair.avoid.map(x => x.toUpperCase());
+        if (!avoidUpper.includes(flightNum.toUpperCase())) continue;
+        // This flight is in the avoid list — check if dispatcher has the 'after' flight
+        if (assignedNums.includes(pair.after.toUpperCase())) return { blocked: true, sendUnassigned: pair.sendUnassigned };
+    }
+    return { blocked: false };
+}
+
+// Get the primary flight number from a flight object (first part for BOTH)
+function primaryFlightNum(f) { return f.number.split('/')[0].trim(); }
+
+// Shuffle array in place (Fisher-Yates) — used for Redo
+function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+}
+
+// ── Core allocation engine ────────────────────────────────────────────
+function runAllocation(dispatchers, isRedo) {
+
+    // ── Helper: does flight count toward fair share? (DEP or BOTH) ──
+    const isDepOrBoth = f => f.type === 'DEP' || f.type === 'BOTH';
+
+    // ── Fair share unit count per dispatcher ──
+    // QR17/18 = 1 unit, QR19/20 = 1 unit (pairs counted as 1 each)
+    const QR_COMBO = ['QR17','QR18','QR19','QR20'];
+    const QR_PAIR_A = ['QR17','QR18'];
+    const QR_PAIR_B = ['QR19','QR20'];
+
+    function flightMatchesNum(f, num) {
+        return f.number.split('/').map(n=>n.trim().toUpperCase()).includes(num.toUpperCase());
+    }
+    function isQRPairA(f) { return QR_PAIR_A.some(n => flightMatchesNum(f,n)); }
+    function isQRPairB(f) { return QR_PAIR_B.some(n => flightMatchesNum(f,n)); }
+
+    // Fair share unit weight: QR pair flights count as 0.5 each (pair=1 unit together)
+    function fairShareWeight(f) {
+        if (!isDepOrBoth(f)) return 0;
+        if (isQRPairA(f) || isQRPairB(f)) return 0.5;
+        return 1;
+    }
+
+    // Fair share score for a dispatcher
+    function fairScore(dName) {
+        return (allocMap[dName] || []).reduce((s,f) => s + fairShareWeight(f), 0);
+    }
+
+    // Total fair-share units across all DEP/BOTH flights
+    const totalDepBoth = allFlights.filter(isDepOrBoth);
+    // QR pairs count as 1 unit per pair
+    const qrPairAFlights = totalDepBoth.filter(isQRPairA);
+    const qrPairBFlights = totalDepBoth.filter(isQRPairB);
+    const totalUnits = totalDepBoth.reduce((s,f) => s + fairShareWeight(f), 0);
+    const fairShare = dispatchers.length > 0 ? totalUnits / dispatchers.length : 0;
+    // Max allowed per dispatcher (ceil so some get +1 when it doesn't divide evenly)
+    const maxShare = Math.ceil(fairShare);
+
+    // ── Priority rank ──
     function priorityRank(f) {
         const airline = getAirlineCode(f);
-        if (['EY','AC','QR'].includes(airline))                    return 0;
-        if (airline === 'DL' && f.type === 'DEP')                  return 0;
-        if (f.type === 'BOTH' || f.type === 'DEP')                 return 1;
-        if (f.type === 'ARR' && (airline === 'HU' || airline === 'DL')) return 2;
-        return 1; // any other ARR (treated same as BOTH/DEP)
+        if (['EY','AC','QR'].includes(airline))                         return 0;
+        if (airline === 'DL' && f.type === 'DEP')                       return 0;
+        if (f.type === 'BOTH' || f.type === 'DEP')                      return 1;
+        if (f.type === 'ARR' && (airline === 'HU' || airline === 'DL')) return 3;
+        return 2; // other ARR
     }
+
     const sorted = [...allFlights].sort((a,b) => {
         const pa = priorityRank(a), pb = priorityRank(b);
         if (pa !== pb) return pa - pb;
         return flightSortTime(a).localeCompare(flightSortTime(b));
     });
 
-    unassigned = [];
+    // ── PREFERENCE P1: QR pairing (QR17/18/19/20 all to one dispatcher) ──
+    const qrComboFlights = sorted.filter(f => QR_COMBO.some(n => flightMatchesNum(f,n)));
+    let qrLockedIds = new Set();
 
-    sorted.forEach(flight => {
-        const eligible = dispatchers.filter(d => dispatcherEligible(d, flight, allocMap));
-        if (eligible.length === 0) { unassigned.push({...flight}); return; }
+    if (qrComboFlights.length > 0) {
+        let dispList = [...dispatchers];
+        if (isRedo) shuffle(dispList);
+        let allFourDone = false;
 
-        // Dispatcher with fewest flights
-        const best = eligible.reduce((p,c) => allocMap[p.name].length <= allocMap[c.name].length ? p : c);
-        allocMap[best.name].push({...flight});
+        // Try all 4 to one dispatcher
+        for (const d of dispList) {
+            const tempArr = [];
+            let canDoAll = true;
+            for (const f of qrComboFlights) {
+                if (!isAuthorized(d, f)) { canDoAll = false; break; }
+                const win = engagementWindow(f);
+                if (!shiftContainsWindow(d, win)) { canDoAll = false; break; }
+                const overlap = tempArr.some(ef => windowsOverlap(win, engagementWindow(ef), toMins(d.start)));
+                if (overlap) { canDoAll = false; break; }
+                tempArr.push(f);
+            }
+            if (canDoAll) {
+                qrComboFlights.forEach(f => { allocMap[d.name].push({...f}); qrLockedIds.add(f.id); });
+                allFourDone = true;
+                break;
+            }
+        }
+
+        // Fallback: QR17/18 to one, QR19/20 to another
+        if (!allFourDone) {
+            const pairAFlights = qrComboFlights.filter(isQRPairA);
+            const pairBFlights = qrComboFlights.filter(isQRPairB);
+            let dispList2 = [...dispatchers];
+            if (isRedo) shuffle(dispList2);
+            let pairsDone = false;
+
+            for (const da of dispList2) {
+                const tempA = [];
+                let canA = pairAFlights.every(f => {
+                    if (!isAuthorized(da,f)) return false;
+                    const win = engagementWindow(f);
+                    if (!shiftContainsWindow(da,win)) return false;
+                    if (tempA.some(ef => windowsOverlap(win,engagementWindow(ef),toMins(da.start)))) return false;
+                    tempA.push(f); return true;
+                });
+                if (!canA) continue;
+
+                for (const db of dispList2) {
+                    if (db.name === da.name) continue;
+                    const tempB = [];
+                    let canB = pairBFlights.every(f => {
+                        if (!isAuthorized(db,f)) return false;
+                        const win = engagementWindow(f);
+                        if (!shiftContainsWindow(db,win)) return false;
+                        if (tempB.some(ef => windowsOverlap(win,engagementWindow(ef),toMins(db.start)))) return false;
+                        tempB.push(f); return true;
+                    });
+                    if (canB) {
+                        pairAFlights.forEach(f => { allocMap[da.name].push({...f}); qrLockedIds.add(f.id); });
+                        pairBFlights.forEach(f => { allocMap[db.name].push({...f}); qrLockedIds.add(f.id); });
+                        pairsDone = true; break;
+                    }
+                }
+                if (pairsDone) break;
+            }
+        }
+    }
+
+    // ── PREFERENCE P2: DL176/DL177 pairing ──
+    const DL_PAIR = ['DL176','DL177'];
+    const dlPairFlights = sorted.filter(f => DL_PAIR.some(n => flightMatchesNum(f,n)));
+    let dlLockedIds = new Set();
+
+    if (dlPairFlights.length >= 2) {
+        let dispList = [...dispatchers];
+        if (isRedo) shuffle(dispList);
+        for (const d of dispList) {
+            const tempArr = [];
+            let canDo = true;
+            for (const f of dlPairFlights) {
+                if (!isAuthorized(d,f)) { canDo = false; break; }
+                const win = engagementWindow(f);
+                if (!shiftContainsWindow(d,win)) { canDo = false; break; }
+                if (tempArr.some(ef => windowsOverlap(win,engagementWindow(ef),toMins(d.start)))) { canDo = false; break; }
+                tempArr.push(f);
+            }
+            if (canDo) {
+                dlPairFlights.forEach(f => { allocMap[d.name].push({...f}); dlLockedIds.add(f.id); });
+                break;
+            }
+        }
+    }
+
+    // ── DL concentration: track 2 primary DL dispatchers ──
+    const dlAuthorizedDisp = dispatchers.filter(d =>
+        isAuthorized(d, {number:'DL000', type:'DEP', sta:'N/A', std:'12:00'}));
+    const dlPrimaryDisps = new Set();
+    // Pre-seed: if DL pair was assigned, that dispatcher is a primary DL dispatcher
+    dispatchers.forEach(d => {
+        if ((allocMap[d.name]||[]).some(f => getAirlineCode(f)==='DL')) dlPrimaryDisps.add(d.name);
     });
 
-    renderAll(acsStaff, dispatchers, lddStaff);
+    // ── Mark all pre-assigned flights ──
+    const alreadyAssignedIds = new Set([...qrLockedIds, ...dlLockedIds]);
+
+    // ── Separate remaining flights into DEP/BOTH and ARR ──
+    const remainingDepBoth = sorted.filter(f => isDepOrBoth(f) && !alreadyAssignedIds.has(f.id));
+    const remainingArr     = sorted.filter(f => !isDepOrBoth(f) && !alreadyAssignedIds.has(f.id));
+
+    // ── MAIN LOOP: DEP/BOTH first (fair share), then ARR ──
+    function assignFlight(flight) {
+        const airline    = getAirlineCode(flight);
+        const flightNum  = primaryFlightNum(flight).toUpperCase();
+        const isDep      = isDepOrBoth(flight);
+        const weight     = fairShareWeight(flight);
+
+        let eligible = dispatchers.filter(d => dispatcherEligible(d, flight, allocMap));
+        if (eligible.length === 0) { unassigned.push({...flight}); return; }
+
+        // Apply avoidance rules
+        let filtered = eligible.filter(d => !isBlockedByAvoidance(d, flightNum).blocked);
+        if (filtered.length === 0) {
+            const hardBlock = AVOIDANCE_PAIRS.some(p =>
+                p.avoid.map(x=>x.toUpperCase()).includes(flightNum) && p.sendUnassigned);
+            if (hardBlock) { unassigned.push({...flight}); return; }
+            filtered = eligible; // last resort fallback
+        }
+        eligible = filtered;
+
+        // Fair share filter for DEP/BOTH: exclude dispatchers already at max share
+        if (isDep) {
+            const underMax = eligible.filter(d => fairScore(d.name) + weight <= maxShare);
+            if (underMax.length > 0) eligible = underMax;
+            // else everyone is at max — still assign to least loaded
+        }
+
+        // DL concentration preference
+        if (airline === 'DL') {
+            if (dlPrimaryDisps.size < 2) {
+                const dlFirst   = eligible.filter(d => dlAuthorizedDisp.some(x=>x.name===d.name) && !dlPrimaryDisps.has(d.name));
+                const dlAlready = eligible.filter(d => dlPrimaryDisps.has(d.name));
+                const preferred = [...dlAlready, ...dlFirst];
+                if (preferred.length > 0) eligible = preferred;
+            } else {
+                const primary = eligible.filter(d => dlPrimaryDisps.has(d.name));
+                if (primary.length > 0) eligible = primary;
+            }
+        }
+
+        // Sort by fair score (least loaded first), shuffle within ties for variety on Redo
+        eligible.sort((a,b) => {
+            const diff = fairScore(a.name) - fairScore(b.name);
+            if (diff !== 0) return diff;
+            return isRedo ? (Math.random() < 0.5 ? -1 : 1) : 0;
+        });
+
+        const best = eligible[0];
+        if (airline === 'DL') dlPrimaryDisps.add(best.name);
+        allocMap[best.name].push({...flight});
+    }
+
+    remainingDepBoth.forEach(assignFlight);
+    remainingArr.forEach(assignFlight);
 }
 
 // ── Render ────────────────────────────────────────────────────────────
